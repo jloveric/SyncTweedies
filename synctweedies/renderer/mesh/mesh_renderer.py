@@ -34,8 +34,14 @@ class UVProjection():
         if auto_center:
             verts = mesh.verts_packed()
             faces = mesh.faces_packed()
-            center = verts.mean(dim=0)
+            #center = verts.mean(dim=0)
+            min_extents = verts.min(dim=0)[0]
+            max_extents = verts.max(dim=0)[0]
+
+            # Compute the center based on the extents
+            center = (min_extents + max_extents) / 2.0
             verts = verts - center
+
             scale = torch.max(torch.norm(verts, p=2, dim=1))
             verts = verts / scale
             verts *= scale_factor
