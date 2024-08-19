@@ -79,6 +79,8 @@ class BaseModel(metaclass=ABCMeta):
                 _scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
             elif self.config.sampling_method == "euler":
                 _scheduler = EulerDiscreteScheduler(pipe.scheduler.config)
+            elif self.config.sampling_method == "unipc" :
+                _scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
             else:
                 raise NotImplementedError(
                     f"{self.config.sampling_method} not implemented"
@@ -123,7 +125,7 @@ class BaseModel(metaclass=ABCMeta):
             lora_name = "zs"
 
             controlnet = ControlNetModel.from_pretrained(
-                "diffusers/controlnet-depth-sdxl-1.0",
+                "diffusers/controlnet-canny-sdxl-1.0",
                 variant="fp16",
                 torch_dtype=torch.float16,
                 mirror=mirror,
@@ -167,7 +169,7 @@ class BaseModel(metaclass=ABCMeta):
                 #**pipe.components
             )
             """
-            # pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+            #pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
 
             # remove following line if xformers is not installed or when using Torch 2.0.
             # pipe.enable_xformers_memory_efficient_attention()
