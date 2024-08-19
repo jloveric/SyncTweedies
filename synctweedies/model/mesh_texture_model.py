@@ -18,8 +18,9 @@ from synctweedies.method_configs.case_config import (CANONICAL_DENOISING_ZT,
                                                 JOINT_DENOISING_ZT, METHOD_MAP)
 from synctweedies.model.base_model import BaseModel
 
-from diffusers import ControlNetModel
-from diffusers.utils import is_compiled_module
+from diffusers import ControlNetModel, StableDiffusionUpscalePipeline
+from diffusers.utils.torch_utils import is_compiled_module
+import time
 
 
 color_constants = {"black": [-1, -1, -1], "white": [1, 1, 1], "maroon": [0, -1, -1],
@@ -89,10 +90,11 @@ class MeshTextureModel(BaseModel):
         ref_views = []
         if len(ref_views) == 0:
             ref_views = [front_view_idx]
-
+        device = self.model._execution_device #'cuda'
         self.group_metas = split_groups(self.attention_mask, self.config.max_batch_size, ref_views)
-
-        self.uvp = UVP(texture_size=self.config.latent_tex_size, render_size=self.config.latent_view_size, sampling_mode=self.config.rasterize_mode, channels=4, device=self.model._execution_device)
+        print('self.model.excution_device', self.model.device, device)
+        self.uvp = UVP(texture_size=self.config.latent_tex_size, render_size=self.config.latent_view_size, 
+                       sampling_mode=self.config.rasterize_mode, channels=4, device=device)
         if self.mesh_path.lower().endswith(".obj"):
             self.uvp.load_mesh(self.mesh_path, scale_factor=self.config.mesh_scale or 1, autouv=self.config.mesh_autouv)
         elif self.mesh_path.lower().endswith(".glb"):
@@ -103,17 +105,18 @@ class MeshTextureModel(BaseModel):
             assert False, "The mesh file format is not supported. Use .obj or .glb."
         self.uvp.set_cameras_and_render_settings(self.camera_poses, centers=camera_centers, camera_distance=2.0)
 
-
-        self.uvp_rgb = UVP(texture_size=self.config.rgb_tex_size, render_size=self.config.rgb_view_size, sampling_mode=self.config.rasterize_mode, channels=3, device=self.model._execution_device)
+        #print('self.model.excution_device', self.model._execution_device)
+        self.uvp_rgb = UVP(texture_size=self.config.rgb_tex_size, render_size=self.config.rgb_view_size, sampling_mode=self.config.rasterize_mode, 
+                           channels=3, device=device)
         self.uvp_rgb.mesh = self.uvp.mesh.clone()
         self.uvp_rgb.set_cameras_and_render_settings(self.camera_poses, centers=camera_centers, camera_distance=2.0)
         _,_,_,cos_maps,_, _ = self.uvp_rgb.render_geometry()
         self.uvp_rgb.calculate_cos_angle_weights(cos_maps, fill=False, disable=self.config.disable_voronoi)
 
-        color_images = torch.FloatTensor([color_constants[name] for name in color_names]).reshape(-1,3,1,1).to(dtype=self.model.text_encoder.dtype, device=self.model._execution_device)
+        color_images = torch.FloatTensor([color_constants[name] for name in color_names]).reshape(-1,3,1,1).to(dtype=self.model.text_encoder.dtype, device=device)
         color_images = torch.ones(
             (1,1,self.config.latent_view_size*8, self.config.latent_view_size*8),
-            device=self.model._execution_device, 
+            device=device, 
             dtype=self.model.text_encoder.dtype
         ) * color_images
         color_images *= ((0.5*color_images)+0.5)
@@ -225,7 +228,8 @@ class MeshTextureModel(BaseModel):
         width = width or self.model.unet.config.sample_size * self.model.vae_scale_factor
 
         controlnet_conditioning_scale = self.config.conditioning_scale
-        prompt = f"Best quality, extremely detailed {self.config.prompt}"
+        #prompt = f"Best quality, extremely detailed {self.config.prompt}"
+        prompt = self.config.prompt
         negative_prompt = self.config.negative_prompt
         callback_steps = 1
 
@@ -236,15 +240,16 @@ class MeshTextureModel(BaseModel):
 
         # 1. Check inputs. Raise error if not correct
         self.model.check_inputs(
-            prompt,
-            torch.zeros((1,3,height,width), device=self.model._execution_device),
-            callback_steps,
-            negative_prompt,
-            None,
-            None,
-            controlnet_conditioning_scale,
-            control_guidance_start,
-            control_guidance_end,
+            prompt=prompt,
+            image=torch.zeros((1,3,height,width), device=self.model._execution_device),
+            callback_steps=callback_steps,
+            negative_prompt=negative_prompt,
+            prompt_2=None, # only for sdxl
+            #None,
+            #None,
+            controlnet_conditioning_scale=controlnet_conditioning_scale,
+            control_guidance_start=control_guidance_start,
+            control_guidance_end=control_guidance_end,
         )
 
         # 2. Define call parameters
@@ -271,17 +276,19 @@ class MeshTextureModel(BaseModel):
         text_encoder_lora_scale = (
             cross_attention_kwargs.get("scale", None) if cross_attention_kwargs is not None else None
         )
-        prompt_embeds = self.model._encode_prompt(
-            prompt,
-            device,
-            num_images_per_prompt,
-            do_classifier_free_guidance,
-            negative_prompt,
+        prompt_embeds_tuple = self.model.encode_prompt(
+            prompt=prompt,
+            device=device,
+            num_images_per_prompt=num_images_per_prompt,
+            do_classifier_free_guidance=do_classifier_free_guidance,
+            negative_prompt=negative_prompt,
             prompt_embeds=None,
             negative_prompt_embeds=None,
             lora_scale=text_encoder_lora_scale,
         )
+        prompt_embeds = torch.cat([prompt_embeds_tuple[1], prompt_embeds_tuple[0]])
 
+        print('prompt_embeds', prompt_embeds)
         negative_prompt_embeds, prompt_embeds = torch.chunk(prompt_embeds, 2)
         prompt_embed_dict = dict(zip(direction_names, [emb for emb in prompt_embeds]))
         negative_prompt_embed_dict = dict(zip(direction_names, [emb for emb in negative_prompt_embeds]))
@@ -449,6 +456,8 @@ class MeshTextureModel(BaseModel):
             "main_views": main_views,
             "cos_weighted": True,
             "background_colors": background_colors,
+            "positive_prompt_embeds_2" : [],
+            "negative_prompt_embeds_2" : []
         }
         with self.model.progress_bar(total=len(timesteps)) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -585,8 +594,19 @@ class MeshTextureModel(BaseModel):
         for _i in range(len(textured_views)):
             torch_to_pil(textured_views[_i][:3]).save(f"{eval_dir}/final_averaged_images_{_i:02d}.png")
 
+        upscale_image = False
+        
+        if upscale_image :
+            upscale = Upscale()
+            for _i in range(len(textured_views)) :
+                input_path = f"{eval_dir}/final_averaged_images_{_i:02d}.png"
+                output_path = f"{eval_dir}/final_upscaled_{_i:02d}.png"
+                upscale(input_path, output_path)
+
         textured_views_rgb = torch.cat(textured_views, axis=-1)[:-1,...]
         textured_views_rgb = textured_views_rgb.permute(1,2,0).cpu().numpy()[None,...]
+        print("textured_views.shape", textured_views_rgb.shape)
+
         v = numpy_to_pil(textured_views_rgb)[0]
         v.save(f"{self.result_dir}/textured_views_rgb.png")
 
@@ -657,3 +677,27 @@ class MeshTextureModel(BaseModel):
                 save_path = os.path.join(self.original_img_dir, "dense_view.gif")
                 img, *imgs = gif_imgs
                 img.save(save_path, save_all=True, append_images=imgs, duration=75, loop=0)
+
+class Upscale() :
+    def __init__(self) :
+        mirror = 'https://mirrors.tuna.tsinghua.edu.cn/hugging-face-models'
+        device= 'cuda'
+        model_id = "stabilityai/stable-diffusion-x4-upscaler"
+        failed = True
+        while failed :
+            try :
+                self.pipeline = StableDiffusionUpscalePipeline.from_pretrained(
+                    model_id,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    resume_download=True,
+                    mirror=mirror,
+                )
+                self.pipeline = self.pipeline.to(device)
+                failed = False
+            except :
+                time.sleep(10)
+
+    def __call__(self, input_path, output_path, prompt="building") :
+        low_res_img = Image.open(input_path).convert("RGB")
+        upscaled_image = self.pipeline(prompt=prompt, image=low_res_img).images[0]
+        upscaled_image.save(output_path)

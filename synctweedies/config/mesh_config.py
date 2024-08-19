@@ -34,6 +34,7 @@ def load_mesh_config():
     parser.add_argument('--latent_tex_size', type=int, default=1536, help='Originally 1536 in paper, use lower resolution save VRAM')
     parser.add_argument('--rgb_view_size', type=int, default=768)
     parser.add_argument('--rgb_tex_size', type=int, default=1024)
+    #parser.add_argument('--camera_azims', type=int, action='append', default=[-180,-157.5,-135,-112.5,-90,-67.5,-45,-22.5,0,22.5,45,67.5,90,112.5,135] )#default=[-180, -135, -90, -45, 0, 45, 90, 135])
     parser.add_argument('--camera_azims', type=int, action='append', default=[-180, -135, -90, -45, 0, 45, 90, 135])
     parser.add_argument('--top_cameras', action='store_false', help='Two cameras added to paint the top surface')
     parser.add_argument('--mvd_end', type=float, default=0.8, help='Time step to stop texture space aggregation')

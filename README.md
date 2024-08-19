@@ -1,3 +1,9 @@
+## Using SDXL
+
+```
+python main.py --app mesh --prompt "city in the style of john berkey" --save_top_dir ./output --tag mesh  --save_dir_now --mesh /home/loverich-j/Glodon1-fixed.obj --seed 100 --sampling_method ddim --initialize_xt_from_zt --steps=100 --mesh_scale=1.25  --negative_prompt="poor quality" --case_num=2 --rgb_view_size=1024 --latent_tex_size=2048 --latent_view_size=96 --model=controlnetxl
+```
+
 # SyncTweedies: A General Generative Framework Based on Synchronized Diffusions
 
 ![teaser](assets/teaser.png)

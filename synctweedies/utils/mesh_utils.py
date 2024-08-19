@@ -350,8 +350,10 @@ def measure_metric(pred, gt, mask=None):
 
 
 def prepare_directional_prompt(prompt, negative_prompt):
-    directional_prompt = [prompt + f", {v} view." for v in direction_names]
-    negative_prompt = [negative_prompt + f", {v} view." for v in direction_names ]
+    #directional_prompt = [prompt + f", {v} view." for v in direction_names]
+    #negative_prompt = [negative_prompt + f", {v} view." for v in direction_names ]
+    directional_prompt = [prompt for v in direction_names]
+    negative_prompt = [negative_prompt for v in direction_names ]
     return directional_prompt, negative_prompt
 
 
